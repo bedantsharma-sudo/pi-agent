@@ -14,7 +14,10 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@earendil-works/pi-coding-agent": "latest"
+    "@blackbelt-technology/pi-agent-dashboard": "^0.8.0",
+    "@earendil-works/pi-coding-agent": "latest",
+    "pi-mcp-extension": "^1.5.0",
+    "pi-memory": "^0.4.2"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
