@@ -5,7 +5,7 @@
   "description": "Orchestrator for the agentic coding pipeline (PRD-critic, Planner, Coder, Reviewer, Supervisor) built on the Pi coding agent SDK.",
   "type": "module",
   "engines": {
-    "node": ">=20"
+    "node": "^22.12.0 || ^24.0.0 || >=26.0.0"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
