@@ -56,6 +56,25 @@ each package's root directory — works exactly as the plan assumed, for (a) and
 With both bugs fixed, `npx tsc -p tsconfig.json --noEmit` is clean and the script runs
 to completion.
 
+## Credentials note
+
+The task brief flagged that `ModelRuntime.create()` needing a working model credential
+is a distinct failure mode from extension loading, and asked for it to be reported
+separately if hit. It was **not** hit on this machine, but not for the reason the brief
+anticipated: `~/.pi/agent/auth.json` is empty (`{}`) and `ANTHROPIC_API_KEY` is unset in
+this environment, so an Anthropic credential specifically was not available. However,
+this development machine has a pre-existing interactive `pi` install with
+`~/.pi/agent/settings.json` configured to use `google/gemini-3.1-pro-preview` as its
+model, and a `GEMINI_API_KEY` is set in the shell environment — `ModelRuntime.create()`
+picked that up and used it, so `session.prompt()` calls actually ran against Gemini, not
+Anthropic. The spike's (a)/(b) results above are genuine model-completed tool calls, not
+mocked — but on a machine with no `pi`-ecosystem history at all and no
+`ANTHROPIC_API_KEY`/other provider key set, `ModelRuntime.create()` would be expected to
+throw for lack of any credential, exactly as the brief anticipated. Task 13-16's session
+factories should not assume a model is implicitly available the way this spike run
+did — that came from an artifact of this particular developer machine, not something
+the SDK guarantees.
+
 ## (a) GitNexus MCP tool — confirmed working
 
 The session, created entirely headlessly via `createAgentSession()`, called a real
