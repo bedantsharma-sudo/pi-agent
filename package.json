@@ -1,0 +1,23 @@
+{
+  "name": "pi-pipeline",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Orchestrator for the agentic coding pipeline (PRD-critic, Planner, Coder, Reviewer, Supervisor) built on the Pi coding agent SDK.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx src/index.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "latest"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  }
+}
