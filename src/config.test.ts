@@ -35,4 +35,27 @@ describe("loadRunConfig", () => {
       "PIPELINE_WORKSPACE_ROOT",
     );
   });
+
+  it("throws a clear error when PIPELINE_MAX_LOOP_ITERATIONS is not a positive integer", () => {
+    expect(() =>
+      loadRunConfig(
+        { ...baseEnv, PIPELINE_MAX_LOOP_ITERATIONS: "abc" },
+        { prdText: "Add X", humanIdentity: "alice@example.com" },
+      ),
+    ).toThrow("PIPELINE_MAX_LOOP_ITERATIONS");
+
+    expect(() =>
+      loadRunConfig(
+        { ...baseEnv, PIPELINE_MAX_LOOP_ITERATIONS: "-5" },
+        { prdText: "Add X", humanIdentity: "alice@example.com" },
+      ),
+    ).toThrow("PIPELINE_MAX_LOOP_ITERATIONS");
+
+    expect(() =>
+      loadRunConfig(
+        { ...baseEnv, PIPELINE_MAX_LOOP_ITERATIONS: "3.14" },
+        { prdText: "Add X", humanIdentity: "alice@example.com" },
+      ),
+    ).toThrow("PIPELINE_MAX_LOOP_ITERATIONS");
+  });
 });
