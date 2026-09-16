@@ -2,7 +2,7 @@
 
 This is the implementation repo for the agentic coding pipeline: a multi-agent system, built on the [Pi](https://pi.dev) coding harness, that takes a feature from a PRD to a human-reviewable GitLab merge request against `fastrr-checkout-services` — plus the infrastructure to run it safely for a team of 30-40 people at once.
 
-**Nothing is implemented yet.** This repo currently contains only project scaffolding (`package.json`, `tsconfig.json`, an empty `src/index.ts`). Everything below is design context for whoever picks this up next — read this before writing any orchestrator code.
+**Implementation is underway** (see "Current progress" below for exactly how far). Everything below is design context for whoever picks this up next — read this before touching orchestrator code, and read "Current progress" before assuming anything is or isn't built yet.
 
 ## Where the specs live
 
@@ -73,6 +73,39 @@ Docker was the isolation mechanism, not a bespoke sandbox — Pi has **no built-
 - **Full crash-resume after a hard host failure mid-job** — Docker's `--restart unless-stopped` protects against benign hiccups (daemon restarts etc.); a genuine host crash mid-run is accepted as a manual-investigation failure for v1, not something auto-recovered.
 - **Multi-box scaling** — not built now, but every isolation boundary (per-user containers, the job registry, the concurrency queue) is expressed in terms that don't assume "this specific machine," so it's meant to be additive later, not a rework.
 
+## Current progress (as of 2026-09-16)
+
+Implementation follows a 21-task plan at `docs/superpowers/plans/2026-09-15-agent-pipeline-implementation.md`, executed via subagent-driven development (a fresh implementer + reviewer per task) in the git worktree `.worktrees/feature-agent-pipeline-implementation` on branch `feature/agent-pipeline-implementation` — **this branch, not `master`, is where all the actual code lives right now.** `master` still only has the original scaffolding. If you're reading this from `master`, switch to that branch/worktree first.
+
+Live status ledger: `.superpowers/sdd/2026-09-15-agent-pipeline-implementation/progress.md` (inside that worktree) — it has the full task-by-task history (implementer/reviewer verdicts, fix rounds, rulings). This section is a summary of it, not a replacement.
+
+**Done (Tasks 1-6 of 21, all reviewed clean):**
+- Task 1 — vitest test runner
+- Task 2 — `RunConfig`/shared types (`src/types.ts`) and the env-var-driven config loader (`src/config.ts`)
+- Task 3 — the extension-loading spike (see `SPIKE_FINDINGS.md` and the "Why Pi..." section above) — this is what confirmed GitNexus MCP bridging and `pi-memory` work on headless SDK sessions, and that `pi-agent-dashboard` visibility currently does **not**
+- Task 4 — Supervisor Tier-1 deterministic guardrail rules (`src/supervisor/tier1-rules.ts`)
+- Task 5 — Supervisor Tier-2 gray-zone matcher (`src/supervisor/tier2-matcher.ts`)
+- Task 6 — mandatory tool-use tracker and submit gate (`src/enforcement/tool-tracker.ts`)
+
+**In progress:** Task 7 (`run_tests` custom tool) — implemented and through one fix round (added a subprocess timeout, workspace-boundary enforcement against path-escape via the LLM-supplied `repo` parameter, and restricted the spawned process's environment to just `PATH`/`JAVA_HOME`/`M2_HOME`) — the scoped re-review confirming that fix round is what's running next.
+
+**Not started (Tasks 8-21):** the Tier-2 model classifier, the submit-tool factories, wiring the Supervisor/enforcement hooks into actual `pi.on("tool_call")` handlers, all five session factories (PRD-critic/Planner/Coder/Reviewer + the loop driver), the audit log, GitLab MR creation via `glab`, the top-level orchestrator, the CLI entry point, and finally an end-to-end validation run against a real low-stakes PRD. In short: every individual building block so far is real and tested in isolation, but **nothing is wired together into a runnable pipeline yet** — that assembly happens in the later tasks (roughly 13-20).
+
+## How to run and test this project right now
+
+There is no working end-to-end pipeline to run yet (see above) — what you can do today:
+
+```bash
+cd /Users/bedantsharma/pi-pipeline/.worktrees/feature-agent-pipeline-implementation
+npm install          # first time / after pulling new deps
+npm test              # runs the full vitest suite for everything built so far
+npm run typecheck     # tsc --noEmit, catches type errors across all of src/
+```
+
+`npm test` is the meaningful signal right now — every task above (1, 2, 4, 5, 6, and 7's fix) landed with real unit tests, and they should all be green. There's deliberately no test for Task 3 (the spike) — it's exercised by actually running `src/spike/verify-extensions.ts` by hand (see its own instructions / `SPIKE_FINDINGS.md` for how), not part of the automated suite.
+
+Once the plan reaches Task 21 (end-to-end validation), there will be a real way to invoke the whole pipeline against a PRD from the CLI (`src/index.ts`, built in Task 20) — that's the point at which "run this project" will mean something beyond `npm test`. Until then, treat this repo as a set of independently-tested building blocks, not a runnable tool.
+
 ## Immediate next step
 
-Per the two specs' own next steps: invoke the `writing-plans` skill against spec #1 (the pipeline) to produce a phased implementation plan — starting with the extension-loading spike flagged above, since it's the cheapest way to de-risk the biggest open assumption before the rest of the build depends on it.
+Resolve Task 7's in-flight fix-round re-review, then continue the plan task-by-task starting at Task 8 (Supervisor Tier-2 model classifier). No further design decisions are expected between here and Task 21 — the plan and the two specs already settled the shape of everything left; what remains is execution, task review, and the occasional in-flight bug the review process catches (like Task 7's three).
