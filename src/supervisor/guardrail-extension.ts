@@ -11,12 +11,19 @@ export interface GuardrailBlockResult {
 }
 
 // Scoped narrowly: scrub the obvious secret shapes (labeled credentials, bearer tokens, and long
-// base64/hex-looking blobs), not a general secrets-detection engine. manualActions entries get
-// surfaced in the final Supervisor report for human/audit review, so raw tool-call input that
-// happens to contain a credential must not be echoed verbatim.
-function redactSecrets(text: string): string {
+// base64/hex-looking blobs), not a general secrets-detection engine.
+//
+// Must run against the RAW (unescaped) string value, before that value is ever passed through
+// JSON.stringify — not after stringifying the whole input object. JSON.stringify turns a literal
+// `"abc123"` into `\"abc123\"`; redacting the already-escaped text means a naive `"?` in the
+// pattern no longer matches the escaped `\"`, so the "matched" span silently stops short of the
+// real value and the secret leaks in plain text right after the [REDACTED] marker (this bit us
+// once already — see the fix-report history in task-10-report.md). Redacting each raw value
+// first, before serialization, sidesteps that whole class of escaping bug rather than chasing it
+// through more quote variants.
+function redactSecretsInText(text: string): string {
   let redacted = text;
-  // Labeled credential fields, e.g. "password":"...", password=..., token: ..., Authorization=...
+  // Labeled credential fields, e.g. password="...", password=..., token: ..., Authorization=...
   redacted = redacted.replace(
     /\b(password|passwd|pwd|token|api[_-]?key|secret|access[_-]?key|authorization)\b(\s*[:=]\s*)"?([^\s"&,}]+)"?/gi,
     (_match, key: string, sep: string) => `${key}${sep}[REDACTED]`,
@@ -28,13 +35,25 @@ function redactSecrets(text: string): string {
   return redacted;
 }
 
+// manualActions entries get surfaced in the final Supervisor report for human/audit review, so
+// raw tool-call input that happens to contain a credential must not be echoed verbatim. Shallow
+// by design: only top-level string values are inspected, which matches the shape of the
+// bash/write/edit tool inputs this guards (command, path, content, old_str, new_str, ...).
+function redactInputForLogging(input: Record<string, unknown>): Record<string, unknown> {
+  const redacted: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(input)) {
+    redacted[key] = typeof value === "string" ? redactSecretsInText(value) : value;
+  }
+  return redacted;
+}
+
 function recordManualAction(
   manualActions: ManualActionEntry[],
   toolName: string,
   input: Record<string, unknown>,
   reason: string,
 ): void {
-  const redactedInput = redactSecrets(JSON.stringify(input));
+  const redactedInput = JSON.stringify(redactInputForLogging(input));
   manualActions.push({
     attemptedAction: `${toolName}(${redactedInput.slice(0, 200)})`,
     reason,

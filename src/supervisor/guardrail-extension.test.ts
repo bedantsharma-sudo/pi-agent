@@ -70,6 +70,28 @@ describe("evaluateToolCall", () => {
     expect(manualActions[0].reason).toContain("network timeout calling classifier");
   });
 
+  it("redacts a short quoted secret embedded in a command, surviving JSON escaping (regression)", async () => {
+    // Regression case: a real `"value"` becomes `\"value\"` once the input object is
+    // JSON.stringify'd. Redaction must happen on the raw string value BEFORE that escaping
+    // occurs, or a naive `"?` in the pattern fails to match the escaped quote and the secret
+    // leaks in plain text right after the [REDACTED] marker. This is the exact repro that
+    // caught the bug in the prior round: a 6-character quoted credential inside a bash command.
+    const manualActions: import("../types.js").ManualActionEntry[] = [];
+    const result = await evaluateToolCall(
+      "bash",
+      { command: 'CREATE INDEX idx ON orders(x); mysql --password="abc123" -u root' },
+      [],
+      manualActions,
+      async () => {
+        throw new Error("classifyGrayArea should not be called for a Tier-1 match");
+      },
+    );
+    expect(result?.block).toBe(true);
+    expect(manualActions).toHaveLength(1);
+    expect(manualActions[0].attemptedAction).not.toContain("abc123");
+    expect(manualActions[0].attemptedAction).toContain("[REDACTED]");
+  });
+
   it("redacts secret-shaped content from the recorded attemptedAction", async () => {
     const manualActions: import("../types.js").ManualActionEntry[] = [];
     const result = await evaluateToolCall(
