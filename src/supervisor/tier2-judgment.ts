@@ -9,13 +9,15 @@ export interface Tier2Verdict {
   reason: string;
 }
 
-let cachedRuntime: ModelRuntime | undefined;
+// Cache the in-flight promise itself, not the resolved value: if two callers invoke
+// getRuntime() concurrently before the first ModelRuntime.create() resolves, they must
+// both await the same creation rather than each seeing `undefined` and racing to create
+// their own runtime (whichever resolved last would silently "win" as the cache).
+let cachedRuntimePromise: Promise<ModelRuntime> | undefined;
 
 async function getRuntime(): Promise<ModelRuntime> {
-  if (!cachedRuntime) {
-    cachedRuntime = await ModelRuntime.create();
-  }
-  return cachedRuntime;
+  cachedRuntimePromise ??= ModelRuntime.create();
+  return cachedRuntimePromise;
 }
 
 export async function classifyGrayArea(toolName: string, input: Record<string, unknown>): Promise<Tier2Verdict> {
@@ -49,11 +51,22 @@ export async function classifyGrayArea(toolName: string, input: Record<string, u
   );
 
   const [firstLine, ...rest] = responseText.trim().split("\n");
-  const decision = firstLine.trim().toLowerCase();
+  // Strip everything but letters so trailing punctuation ("block.") or markdown
+  // ("**block**") don't prevent a clean match, while still requiring the whole first
+  // line to reduce to the decision word (so it embedded mid-sentence, e.g. "I think
+  // block is right", does NOT count as a match).
+  const cleaned = firstLine.trim().toLowerCase().replace(/[^a-z]/g, "");
   const reason = rest.join(" ").trim() || "No reason given by classifier.";
 
-  if (decision === "block" || decision === "flag") {
-    return { decision, reason };
+  // Fail-safe, not fail-open: this classifier exists to catch risky changes, so only an
+  // exact, clean "allow" is treated as allow. "block" is likewise exact. Anything else —
+  // "flag" itself, unparseable output, an unexpected word — defaults to "flag" for human
+  // review, matching the model-unavailable branch above rather than silently allowing.
+  if (cleaned === "block") {
+    return { decision: "block", reason };
   }
-  return { decision: "allow", reason };
+  if (cleaned === "allow") {
+    return { decision: "allow", reason };
+  }
+  return { decision: "flag", reason };
 }
