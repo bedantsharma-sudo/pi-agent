@@ -34,6 +34,14 @@ export async function runPipeline(config: RunConfig, io: HumanIo): Promise<Pipel
     if (event.type === "message_update" && event.assistantMessageEvent.type === "text_delta") {
       process.stdout.write(event.assistantMessageEvent.delta);
     }
+    // Debug visibility for manual testing: print tool calls (GitNexus, memory, etc.) as they
+    // happen, since the pipeline has no other live indicator that a tool was actually called.
+    if (event.type === "tool_execution_start") {
+      process.stdout.write(`\n[tool call] → ${event.toolName}\n`);
+    }
+    if (event.type === "tool_execution_end") {
+      process.stdout.write(`[tool call] ← ${event.toolName}${event.isError ? " (error)" : ""}\n`);
+    }
   });
   await critic.prompt(`Here is the PRD to critique:\n\n${config.prdText}`);
 
