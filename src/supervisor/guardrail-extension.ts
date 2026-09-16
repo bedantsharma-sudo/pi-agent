@@ -10,14 +10,33 @@ export interface GuardrailBlockResult {
   reason: string;
 }
 
+// Scoped narrowly: scrub the obvious secret shapes (labeled credentials, bearer tokens, and long
+// base64/hex-looking blobs), not a general secrets-detection engine. manualActions entries get
+// surfaced in the final Supervisor report for human/audit review, so raw tool-call input that
+// happens to contain a credential must not be echoed verbatim.
+function redactSecrets(text: string): string {
+  let redacted = text;
+  // Labeled credential fields, e.g. "password":"...", password=..., token: ..., Authorization=...
+  redacted = redacted.replace(
+    /\b(password|passwd|pwd|token|api[_-]?key|secret|access[_-]?key|authorization)\b(\s*[:=]\s*)"?([^\s"&,}]+)"?/gi,
+    (_match, key: string, sep: string) => `${key}${sep}[REDACTED]`,
+  );
+  // Bearer tokens in an Authorization header value.
+  redacted = redacted.replace(/\bBearer\s+\S+/gi, "Bearer [REDACTED]");
+  // Long base64/hex-looking blobs (20+ contiguous alphanumeric characters) not already caught above.
+  redacted = redacted.replace(/\b[A-Za-z0-9]{20,}\b/g, "[REDACTED]");
+  return redacted;
+}
+
 function recordManualAction(
   manualActions: ManualActionEntry[],
   toolName: string,
   input: Record<string, unknown>,
   reason: string,
 ): void {
+  const redactedInput = redactSecrets(JSON.stringify(input));
   manualActions.push({
-    attemptedAction: `${toolName}(${JSON.stringify(input).slice(0, 200)})`,
+    attemptedAction: `${toolName}(${redactedInput.slice(0, 200)})`,
     reason,
     requiredManualStep: reason,
   });
@@ -37,7 +56,23 @@ export async function evaluateToolCall(
   }
 
   if (needsTier2Judgment(toolName, input)) {
-    const verdict = await classify(toolName, input);
+    let verdict: Tier2Verdict;
+    try {
+      verdict = await classify(toolName, input);
+    } catch (error) {
+      // A transient classifier failure (network error, timeout, rate limit) must not propagate:
+      // the SDK's tool_call dispatcher has no try/catch around this handler, so an uncaught
+      // rejection here would abort tool-call dispatch for the entire session. Degrade the same
+      // way classifyGrayArea itself does when the model is unavailable: treat it as "flag".
+      const message = error instanceof Error ? error.message : String(error);
+      recordManualAction(
+        manualActions,
+        toolName,
+        input,
+        `Tier-2 classifier failed (${message}); flagging for manual review by default.`,
+      );
+      return undefined;
+    }
     if (verdict.decision === "block") {
       recordManualAction(manualActions, toolName, input, verdict.reason);
       return { block: true, reason: verdict.reason };
