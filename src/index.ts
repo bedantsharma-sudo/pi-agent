@@ -18,18 +18,21 @@ async function main() {
   const config = loadRunConfig(process.env, { prdText, humanIdentity });
 
   const rl = createInterface({ input: process.stdin, output: process.stdout });
-  const result = await runPipeline(config, {
-    askHuman: (prompt) => rl.question(`${prompt}\n> `),
-    isApproved: (reply) => /^(approve|approved|yes|lgtm)$/i.test(reply.trim()),
-  });
-  rl.close();
+  try {
+    const result = await runPipeline(config, {
+      askHuman: (prompt) => rl.question(`${prompt}\n> `),
+      isApproved: (reply) => /^(approve|approved|yes|lgtm)$/i.test(reply.trim()),
+    });
 
-  if (result.outcome === "mr_opened") {
-    console.log(`MR opened: ${result.mrUrl}`);
-  } else {
-    console.log("Pipeline escalated — no MR opened. See the report below:");
+    if (result.outcome === "mr_opened") {
+      console.log(`MR opened: ${result.mrUrl}`);
+    } else {
+      console.log("Pipeline escalated — no MR opened. See the report below:");
+    }
+    console.log(result.reportMarkdown);
+  } finally {
+    rl.close();
   }
-  console.log(result.reportMarkdown);
 }
 
 main().catch((error) => {
