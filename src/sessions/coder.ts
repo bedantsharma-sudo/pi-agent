@@ -17,7 +17,7 @@ touched — this is enforced, not optional. If run_tests fails, fix the issue an
 When you receive revised plan instructions after a Reviewer rejection, address every finding before
 resubmitting.`;
 
-const CODER_TOOLS = ["bash", "edit", "write", "read", "grep", "mcp_gitnexus_query", "mcp_gitnexus_impact", "run_tests", "submit_for_review"];
+const CODER_TOOLS = ["bash", "edit", "write", "read", "grep", "mcp__gitnexus", "run_tests", "submit_for_review"];
 
 export interface CoderSessionResult {
   session: AgentSession;

@@ -13,11 +13,13 @@ wrong thing, or building the right thing in a way that fights this codebase's ac
 ~20-service Java microservice, multirepo codebase.
 
 Before you finalize any critique, you MUST consult: GitNexus (for call-graph/impact analysis), the fastrr
-architecture/context tools (for cross-service and endpoint-flow knowledge), the knowledgebase/ document (for
-org-specific gotchas no single service's code reveals on its own), and your own memory (for what you've
-learned about this codebase in past sessions). Push back on the PRD with concrete reasoning grounded in what
-those tools tell you, not generic software-engineering opinions. Give a recommendation for what CAN be done
-and why, not just objections.
+architecture/context tools (for cross-service and endpoint-flow knowledge), the \`knowledgebase/\` folder at
+the root of this workspace (for org-specific gotchas no single service's code reveals on its own — read
+\`knowledgebase/00-cross-cutting-gotchas.md\` first, always; then read whichever subsystem file(s) match the
+service(s) the PRD is likely to touch, per the table in \`knowledgebase/README.md\`), and your own memory
+(for what you've learned about this codebase in past sessions). Push back on the PRD with concrete reasoning
+grounded in what those tools tell you, not generic software-engineering opinions. Give a recommendation for
+what CAN be done and why, not just objections.
 
 When the human explicitly approves, call finalize_prd with the complete PRD rewritten from scratch,
 incorporating everything the conversation settled on — not the original text with comments appended. Before
@@ -25,19 +27,8 @@ finalizing, write any durable new learning about this codebase to memory with me
 sessions start smarter than this one did.`;
 
 const PRD_CRITIC_TOOLS = [
-  "mcp_gitnexus_query",
-  "mcp_gitnexus_context",
-  "mcp_gitnexus_impact",
-  "fastrr_context_overview",
-  "fastrr_search_context",
-  "fastrr_get_context_entities",
-  "fastrr_traverse_context",
-  "fastrr_architecture_overview",
-  "fastrr_get_service",
-  "fastrr_trace_endpoint_flow",
-  "fastrr_search_skill",
-  "fastrr_fetch_skill",
-  "fastrr_search_knowledge",
+  "mcp__gitnexus",
+  "mcp__fastrr",
   "read",
   "grep",
   "memory_write",
@@ -46,7 +37,7 @@ const PRD_CRITIC_TOOLS = [
   "finalize_prd",
 ];
 
-const PRD_CRITIC_REQUIRED_BEFORE_FINALIZE = ["mcp_gitnexus_query", "memory_read", "memory_search"];
+const PRD_CRITIC_REQUIRED_BEFORE_FINALIZE = ["mcp__gitnexus", "memory_read", "memory_search"];
 
 export interface PrdCriticSessionResult {
   session: AgentSession;

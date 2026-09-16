@@ -4,17 +4,17 @@ import { checkSubmitGate, SessionToolTracker } from "./tool-tracker.js";
 describe("SessionToolTracker + checkSubmitGate", () => {
   it("blocks when a required tool has not been called", () => {
     const tracker = new SessionToolTracker();
-    tracker.recordCall("mcp_gitnexus_query");
-    const gate = checkSubmitGate(tracker, ["mcp_gitnexus_query", "memory_read"]);
+    tracker.recordCall("mcp__gitnexus");
+    const gate = checkSubmitGate(tracker, ["mcp__gitnexus", "memory_read"]);
     expect(gate.allowed).toBe(false);
     expect(gate.reason).toContain("memory_read");
   });
 
   it("allows when all required tools have been called", () => {
     const tracker = new SessionToolTracker();
-    tracker.recordCall("mcp_gitnexus_query");
+    tracker.recordCall("mcp__gitnexus");
     tracker.recordCall("memory_read");
-    const gate = checkSubmitGate(tracker, ["mcp_gitnexus_query", "memory_read"]);
+    const gate = checkSubmitGate(tracker, ["mcp__gitnexus", "memory_read"]);
     expect(gate.allowed).toBe(true);
     expect(gate.reason).toBeUndefined();
   });

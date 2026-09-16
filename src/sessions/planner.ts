@@ -21,16 +21,8 @@ plan to address them and call submit_plan again with the updated plan.
 Call submit_plan when your plan is ready.`;
 
 const PLANNER_TOOLS = [
-  "mcp_gitnexus_query",
-  "mcp_gitnexus_context",
-  "mcp_gitnexus_impact",
-  "fastrr_context_overview",
-  "fastrr_search_context",
-  "fastrr_get_context_entities",
-  "fastrr_traverse_context",
-  "fastrr_architecture_overview",
-  "fastrr_get_service",
-  "fastrr_trace_endpoint_flow",
+  "mcp__gitnexus",
+  "mcp__fastrr",
   "read",
   "grep",
   "submit_plan",

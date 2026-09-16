@@ -17,7 +17,7 @@ Call submit_verdict with status "approve" only when you have independently confi
 no unresolved findings. Otherwise call it with status "revise" and specific, actionable findings — vague
 feedback like "needs improvement" is not acceptable; name the exact issue and where it is.`;
 
-const REVIEWER_TOOLS = ["read", "grep", "bash", "mcp_gitnexus_query", "mcp_gitnexus_impact", "run_tests", "submit_verdict"];
+const REVIEWER_TOOLS = ["read", "grep", "bash", "mcp__gitnexus", "run_tests", "submit_verdict"];
 
 export interface ReviewerSessionResult {
   session: AgentSession;
