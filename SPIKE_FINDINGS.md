@@ -110,6 +110,19 @@ spike-verification-marker
 picks it up and writes there rather than any default location. This confirms the
 plan's assumption for (b).
 
+**Caching caveat found later (during Task 13 review), noted here for visibility**:
+`pi-memory` resolves `PI_MEMORY_DIR` once, at module-import time, into a module-level
+cached variable (`node_modules/pi-memory/index.ts:60`) — it does not re-read the env var
+on every call. This spike's single round-trip didn't exercise it, but it matters for any
+production session factory: setting `PI_MEMORY_DIR` a second time within the same live
+process, aiming at a different memory scope, will silently no-op rather than error —
+pi-memory keeps using whichever directory was in effect the first time it was imported.
+Task 13-16's session factories must assume they are called at most once per process if
+they set this env var (true for every `includeMemory: true` factory in the current
+plan); a future design that needs multiple distinct memory scopes live in one process
+will need process-level isolation (e.g. one process per session), not in-process
+reconfiguration of this env var.
+
 **A conflict surfaced during this check that matters for production use**: this
 development machine already has a *different, older* copy of `pi-memory` installed
 globally at `~/.pi/agent/npm/node_modules/pi-memory` (registered in

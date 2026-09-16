@@ -60,6 +60,13 @@ export async function createPrdCriticSession(
   const holder: SubmissionHolder<string> = { value: undefined };
   const mandatoryTools = createMandatoryToolsExtension("finalize_prd", PRD_CRITIC_REQUIRED_BEFORE_FINALIZE);
 
+  // pi-memory resolves PI_MEMORY_DIR once, at module-import time, into a module-level
+  // cached variable (see node_modules/pi-memory/index.ts:60) — it is not read fresh on
+  // every call. Setting this env var a second time within the same live process, aiming
+  // at a different memory scope, will silently no-op rather than error: pi-memory will
+  // keep using whatever directory was in effect the first time it was imported. This
+  // function assumes it is called at most once per process, which holds for every
+  // includeMemory: true session factory currently in this plan (see SPIKE_FINDINGS.md).
   process.env.PI_MEMORY_DIR = join(config.memoryDir, "prd-critic");
 
   const loader = buildResourceLoader({
