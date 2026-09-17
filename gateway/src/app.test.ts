@@ -58,6 +58,14 @@ describe("GET /auth/callback", () => {
     const response = await request(app).get("/auth/callback?email=a@x.com");
     expect(response.status).toBe(400);
   });
+
+  it("responds 502 without hanging or throwing when Fastrr Admin validation rejects", async () => {
+    const { app, validateFastrrToken } = buildTestApp();
+    validateFastrrToken.mockRejectedValue(new Error("ECONNREFUSED"));
+    const response = await request(app).get("/auth/callback?email=a@x.com&token=the-token");
+    expect(response.status).toBe(502);
+    expect(response.body).toEqual({ error: "Upstream identity provider unavailable" });
+  });
 });
 
 describe("GET /api/me", () => {

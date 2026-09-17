@@ -5,6 +5,10 @@ import { createLocalUserStore } from "./local-users.js";
 import { createJobRegistry } from "./job-registry.js";
 import { createGatewayApp } from "./app.js";
 
+process.on("unhandledRejection", (err) => {
+  console.error("Unhandled rejection:", err);
+});
+
 const config = loadGatewayConfig(process.env);
 const db = openDatabase(config.dbPath);
 const localUsers = createLocalUserStore(db);

@@ -1,5 +1,5 @@
 // gateway/src/app.ts
-import express, { type Express, type Request, type Response } from "express";
+import express, { type Express, type NextFunction, type Request, type Response } from "express";
 import type { LocalUserStore } from "./local-users.js";
 import type { JobRegistry } from "./job-registry.js";
 import { validateFastrrToken as defaultValidateFastrrToken, type FastrrIdentity } from "./fastrr-auth.js";
@@ -54,7 +54,13 @@ export function createGatewayApp(deps: GatewayAppDeps): Express {
       return;
     }
 
-    const identity = await validateFastrrToken(email, token, deps.fastrrBaseUrl);
+    let identity: FastrrIdentity | null;
+    try {
+      identity = await validateFastrrToken(email, token, deps.fastrrBaseUrl);
+    } catch (err) {
+      res.status(502).json({ error: "Upstream identity provider unavailable" });
+      return;
+    }
     if (!identity) {
       res.status(401).json({ error: "Fastrr Admin token validation failed" });
       return;
@@ -78,6 +84,12 @@ export function createGatewayApp(deps: GatewayAppDeps): Express {
       return;
     }
     res.json({ email: user.email, name: user.name, role: user.role });
+  });
+
+  // Terminal safety net: catches anything thrown/rejected by a route handler that wasn't
+  // already handled locally, so a single misbehaving request can't crash the process.
+  app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
+    res.status(500).json({ error: "Internal error" });
   });
 
   return app;
