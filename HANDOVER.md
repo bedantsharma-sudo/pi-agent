@@ -52,9 +52,9 @@ Two-tier design: **Tier 1** is deterministic pattern-matching (no model call) ag
 
 Explicit scope decision: local test execution + opening a GitLab MR is the finish line. Merging, further CI, and deployment are other teams' responsibility — the pipeline was never meant to own that. MR creation itself is a **deterministic orchestrator-level step** (`glab mr create`, run directly by the orchestrator), not something any agent invokes as a tool call — a malformed flag on an MR-creation command is a bad place for model unreliability to show up, so it isn't left to an LLM's tool call at all.
 
-## Why `pi-agent-dashboard`, and why it needed a workaround for multi-tenancy
+## Why `Pi-web`, and why it needed a workaround for multi-tenancy
 
-Chosen over the simpler `pi-web` because it's purpose-built for multi-agent visibility (distinct agent cards, live graph, per-agent timeline) and ships with real OAuth. But investigating it further (for the infra spec) turned up a real gap: **it has no per-user session isolation** — its OAuth gates who can open the dashboard at all, not what they see once inside; the README describes one shared session list with no ownership model. It also expects a standard OAuth2/OIDC handshake, which doesn't match how Fastrr Admin's actual auth flow works. Resolution: don't ask it to do multi-tenancy it wasn't built for — every user gets their **own** dashboard instance, scoped to nothing but their own session directory, reachable only through this project's own gateway after real SSO. The dashboard's job shrinks to pure visualization; identity and isolation are owned entirely by this project.
+choose because of it's simplicity and extensibility. we will change it's source code and build our own custom dashboard out of it. 
 
 ## Why SSO reuses `agent_one`'s flow exactly, instead of building something new
 
