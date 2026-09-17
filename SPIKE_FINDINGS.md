@@ -15,9 +15,34 @@ GITNEXUS_MCP_COMMAND="npx gitnexus mcp" npx tsx src/spike/verify-extensions.ts
 
 | Check | Result |
 |---|---|
-| (a) GitNexus MCP tool callable from a headless session | **Confirmed working** |
+| (a) GitNexus MCP tool callable from a headless session | **Confirmed working — but see correction below** |
 | (b) pi-memory round-trips (write → read) | **Confirmed working** |
 | (c) Session appears live/named in pi-agent-dashboard | **Confirmed NOT working**, at least not out of the box |
+
+> **Correction, added after Task 21 live testing hit `finalize_prd` failing in a loop:**
+> `createAgentSession()` alone does **not** make GitNexus tools callable. The plain SDK
+> path never fires the `"session_start"` extension event — only `session.bindExtensions()`
+> does that (the interactive CLI/TUI/RPC entry points call it; the SDK function itself
+> never does), and pi-mcp-extension's eager MCP-server connection (so every
+> `mcp_<server>_<tool>` tool's registration) is wired to `"session_start"`, not to
+> extension-load time. This spike's own script never called `bindExtensions()` either, so
+> (a) passing here was very likely a false positive specific to this dev machine's
+> pre-existing `pi` state (see the Credentials note above re: this machine's leftover
+> `~/.pi` config) rather than something the mechanism guarantees — re-run today, this
+> exact script's session has no `mcp_gitnexus_*` tools until `bindExtensions({})` is
+> called explicitly. Two further, compounding issues surfaced fixing this for real, both
+> now fixed in `src/sessions/extension-loader.ts`:
+> - This machine's globally-registered `pi-mcp-adapter` (see `~/.pi/agent/settings.json`)
+>   gets auto-discovered alongside the project-local `pi-mcp-extension` unless
+>   `noExtensions: true` is set, and its `session_start` handler throws in a headless
+>   context ("Theme not initialized"), which was silently breaking eager MCP startup.
+> - pi-mcp-extension re-resolves `.pi/mcp.json` at `session_start` using the *session's*
+>   `cwd`, not the `ResourceLoader`'s discovery `cwd` — this project deliberately uses two
+>   different `cwd`s (loader cwd = `piProjectRoot`, session cwd = `workspaceRoot`), so
+>   `.pi/mcp.json` needs to exist at `workspaceRoot` too, not just `piProjectRoot`.
+>
+> See `src/sessions/extension-loader.ts`'s `activateSession()` and
+> `ensureWorkspaceMcpConfig()` for the actual fixes and how each was confirmed.
 
 The plan's original code sketch (task-3-brief.md Step 3) had two bugs that had to be
 fixed before it would even compile/run — see "What had to change" below. Once fixed,

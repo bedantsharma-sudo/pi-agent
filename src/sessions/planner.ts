@@ -3,7 +3,8 @@ import type { AgentSession, ModelRuntime } from "@earendil-works/pi-coding-agent
 import { createGuardrailExtension, type AllowedServicesHolder } from "../supervisor/guardrail-extension.js";
 import { createSubmitPlanTool, type SubmissionHolder } from "../tools/submit-tools.js";
 import type { ManualActionEntry, PlanArtifact, RunConfig } from "../types.js";
-import { buildResourceLoader } from "./extension-loader.js";
+import type { PipelineTelemetry } from "../telemetry/types.js";
+import { activateSession, buildResourceLoader } from "./extension-loader.js";
 
 const PLANNER_SYSTEM_PROMPT = `You are the Planner for the fastrr-checkout-services engineering team.
 
@@ -11,8 +12,8 @@ Given an approved PRD, research which of the ~20 services need changes. Actively
 existing conventions in this codebase — for example, payment reads route through payment-aggregator, not
 directly to payment-core; report logic lives in dashboard-service. You are explicitly biased against adding
 a new service-to-service or service-to-database connection where an existing endpoint could be reused or
-extended instead — use GitNexus and the architecture/context tools to confirm what already exists before
-proposing something new. Flag the Java version for each affected service (check its pom.xml — this codebase
+extended instead — use GitNexus to confirm what already exists before proposing something new. Flag the
+Java version for each affected service (check its pom.xml — this codebase
 has both Java 11 and Java 21 services, and fastrr-common is versioned differently per Java version).
 
 You never write code yourself. When you receive the Reviewer's findings on a later iteration, revise the
@@ -20,9 +21,13 @@ plan to address them and call submit_plan again with the updated plan.
 
 Call submit_plan when your plan is ready.`;
 
+// See prd-critic.ts for why these are individual "mcp_<server>_<tool>" names, not the
+// "mcp__gitnexus" group syntax this used to have (that resolves to nothing), and why
+// fastrr_* tools aren't listed (no fastrr MCP server configured yet).
 const PLANNER_TOOLS = [
-  "mcp__gitnexus",
-  "mcp__fastrr",
+  "mcp_gitnexus_query",
+  "mcp_gitnexus_context",
+  "mcp_gitnexus_impact",
   "read",
   "grep",
   "submit_plan",
@@ -38,6 +43,7 @@ export async function createPlannerSession(
   modelRuntime: ModelRuntime,
   manualActions: ManualActionEntry[],
   allowedServicesHolder: AllowedServicesHolder,
+  telemetry?: PipelineTelemetry,
 ): Promise<PlannerSessionResult> {
   const holder: SubmissionHolder<PlanArtifact> = { value: undefined };
 
@@ -46,7 +52,7 @@ export async function createPlannerSession(
     includeMemory: false,
     includeDashboard: true,
     systemPrompt: PLANNER_SYSTEM_PROMPT,
-    extraFactories: [createGuardrailExtension(manualActions, allowedServicesHolder)],
+    extraFactories: [createGuardrailExtension(manualActions, allowedServicesHolder, telemetry)],
   });
   await loader.reload();
 
@@ -61,6 +67,7 @@ export async function createPlannerSession(
     customTools: [createSubmitPlanTool(holder)],
     tools: PLANNER_TOOLS,
   });
+  await activateSession(session);
 
   return { session, holder };
 }

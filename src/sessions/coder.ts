@@ -2,10 +2,12 @@ import { createAgentSession, SessionManager } from "@earendil-works/pi-coding-ag
 import type { AgentSession, ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { createMandatoryToolsExtension } from "../enforcement/mandatory-tools-extension.js";
 import { createGuardrailExtension, type AllowedServicesHolder } from "../supervisor/guardrail-extension.js";
+import { createThrashDetectorExtension } from "../supervisor/thrash-detector.js";
 import { createRunTestsTool } from "../tools/run-tests.js";
 import { createSubmitForReviewTool, type SubmissionHolder } from "../tools/submit-tools.js";
 import type { ManualActionEntry, RunConfig } from "../types.js";
-import { buildResourceLoader } from "./extension-loader.js";
+import type { PipelineTelemetry } from "../telemetry/types.js";
+import { activateSession, buildResourceLoader } from "./extension-loader.js";
 
 const CODER_SYSTEM_PROMPT = `You are the Coder for the fastrr-checkout-services engineering team.
 
@@ -17,7 +19,19 @@ touched — this is enforced, not optional. If run_tests fails, fix the issue an
 When you receive revised plan instructions after a Reviewer rejection, address every finding before
 resubmitting.`;
 
-const CODER_TOOLS = ["bash", "edit", "write", "read", "grep", "mcp__gitnexus", "run_tests", "submit_for_review"];
+// See prd-critic.ts for why these are individual "mcp_<server>_<tool>" names, not the
+// "mcp__gitnexus" group syntax this used to have (that resolves to nothing).
+const CODER_TOOLS = [
+  "bash",
+  "edit",
+  "write",
+  "read",
+  "grep",
+  "mcp_gitnexus_query",
+  "mcp_gitnexus_impact",
+  "run_tests",
+  "submit_for_review",
+];
 
 export interface CoderSessionResult {
   session: AgentSession;
@@ -29,17 +43,19 @@ export async function createCoderSession(
   modelRuntime: ModelRuntime,
   manualActions: ManualActionEntry[],
   allowedServicesHolder: AllowedServicesHolder,
+  telemetry?: PipelineTelemetry,
 ): Promise<CoderSessionResult> {
   const holder: SubmissionHolder<{ diffSummary: string }> = { value: undefined };
   const mandatoryTools = createMandatoryToolsExtension("submit_for_review", ["run_tests"]);
-  const guardrail = createGuardrailExtension(manualActions, allowedServicesHolder);
+  const guardrail = createGuardrailExtension(manualActions, allowedServicesHolder, telemetry);
+  const thrashDetector = createThrashDetectorExtension(manualActions, telemetry);
 
   const loader = buildResourceLoader({
     cwd: config.piProjectRoot,
     includeMemory: false,
     includeDashboard: true,
     systemPrompt: CODER_SYSTEM_PROMPT,
-    extraFactories: [mandatoryTools, guardrail],
+    extraFactories: [mandatoryTools, guardrail, thrashDetector],
   });
   await loader.reload();
 
@@ -55,6 +71,7 @@ export async function createCoderSession(
     customTools: [createSubmitForReviewTool(holder), createRunTestsTool(config.workspaceRoot)],
     tools: CODER_TOOLS,
   });
+  await activateSession(session);
 
   return { session, holder };
 }

@@ -1,6 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { isToolCallEventType } from "@earendil-works/pi-coding-agent";
 import type { ManualActionEntry } from "../types.js";
+import type { GuardrailDecisionRecord, PipelineTelemetry } from "../telemetry/types.js";
 import { checkTier1Rules } from "./tier1-rules.js";
 import { needsTier2Judgment } from "./tier2-matcher.js";
 import { classifyGrayArea, type Tier2Verdict } from "./tier2-judgment.js";
@@ -67,11 +68,14 @@ export async function evaluateToolCall(
   allowedServices: string[],
   manualActions: ManualActionEntry[],
   classify: (toolName: string, input: Record<string, unknown>) => Promise<Tier2Verdict>,
+  onDecision?: (record: GuardrailDecisionRecord) => void,
 ): Promise<GuardrailBlockResult | undefined> {
   const tier1 = checkTier1Rules(toolName, input, allowedServices);
   if (tier1.matched) {
-    recordManualAction(manualActions, toolName, input, tier1.reason ?? "Blocked by Tier-1 guardrail rule");
-    return { block: true, reason: tier1.reason ?? "Blocked by Tier-1 guardrail rule" };
+    const reason = tier1.reason ?? "Blocked by Tier-1 guardrail rule";
+    recordManualAction(manualActions, toolName, input, reason);
+    onDecision?.({ tier: 1, toolName, blocked: true, reason });
+    return { block: true, reason };
   }
 
   if (needsTier2Judgment(toolName, input)) {
@@ -84,20 +88,19 @@ export async function evaluateToolCall(
       // rejection here would abort tool-call dispatch for the entire session. Degrade the same
       // way classifyGrayArea itself does when the model is unavailable: treat it as "flag".
       const message = error instanceof Error ? error.message : String(error);
-      recordManualAction(
-        manualActions,
-        toolName,
-        input,
-        `Tier-2 classifier failed (${message}); flagging for manual review by default.`,
-      );
+      const reason = `Tier-2 classifier failed (${message}); flagging for manual review by default.`;
+      recordManualAction(manualActions, toolName, input, reason);
+      onDecision?.({ tier: 2, toolName, blocked: false, reason });
       return undefined;
     }
     if (verdict.decision === "block") {
       recordManualAction(manualActions, toolName, input, verdict.reason);
+      onDecision?.({ tier: 2, toolName, blocked: true, reason: verdict.reason });
       return { block: true, reason: verdict.reason };
     }
     if (verdict.decision === "flag") {
       recordManualAction(manualActions, toolName, input, verdict.reason);
+      onDecision?.({ tier: 2, toolName, blocked: false, reason: verdict.reason });
     }
   }
 
@@ -113,7 +116,11 @@ export interface AllowedServicesHolder {
   services: string[];
 }
 
-export function createGuardrailExtension(manualActions: ManualActionEntry[], allowedServicesHolder: AllowedServicesHolder) {
+export function createGuardrailExtension(
+  manualActions: ManualActionEntry[],
+  allowedServicesHolder: AllowedServicesHolder,
+  telemetry?: PipelineTelemetry,
+) {
   return function guardrailExtension(pi: ExtensionAPI) {
     pi.on("tool_call", async (event) => {
       if (
@@ -127,6 +134,7 @@ export function createGuardrailExtension(manualActions: ManualActionEntry[], all
           allowedServicesHolder.services,
           manualActions,
           classifyGrayArea,
+          telemetry ? (record) => telemetry.recordGuardrailDecision(record) : undefined,
         );
       }
       return undefined;

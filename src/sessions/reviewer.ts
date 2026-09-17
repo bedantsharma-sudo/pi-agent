@@ -4,7 +4,8 @@ import { createGuardrailExtension, type AllowedServicesHolder } from "../supervi
 import { createRunTestsTool } from "../tools/run-tests.js";
 import { createSubmitVerdictTool, type SubmissionHolder } from "../tools/submit-tools.js";
 import type { ManualActionEntry, ReviewVerdict, RunConfig } from "../types.js";
-import { buildResourceLoader } from "./extension-loader.js";
+import type { PipelineTelemetry } from "../telemetry/types.js";
+import { activateSession, buildResourceLoader } from "./extension-loader.js";
 
 const REVIEWER_SYSTEM_PROMPT = `You are the Reviewer for the fastrr-checkout-services engineering team.
 
@@ -17,7 +18,17 @@ Call submit_verdict with status "approve" only when you have independently confi
 no unresolved findings. Otherwise call it with status "revise" and specific, actionable findings — vague
 feedback like "needs improvement" is not acceptable; name the exact issue and where it is.`;
 
-const REVIEWER_TOOLS = ["read", "grep", "bash", "mcp__gitnexus", "run_tests", "submit_verdict"];
+// See prd-critic.ts for why these are individual "mcp_<server>_<tool>" names, not the
+// "mcp__gitnexus" group syntax this used to have (that resolves to nothing).
+const REVIEWER_TOOLS = [
+  "read",
+  "grep",
+  "bash",
+  "mcp_gitnexus_query",
+  "mcp_gitnexus_impact",
+  "run_tests",
+  "submit_verdict",
+];
 
 export interface ReviewerSessionResult {
   session: AgentSession;
@@ -29,6 +40,7 @@ export async function createReviewerSession(
   modelRuntime: ModelRuntime,
   manualActions: ManualActionEntry[],
   allowedServicesHolder: AllowedServicesHolder,
+  telemetry?: PipelineTelemetry,
 ): Promise<ReviewerSessionResult> {
   const holder: SubmissionHolder<ReviewVerdict> = { value: undefined };
 
@@ -37,7 +49,7 @@ export async function createReviewerSession(
     includeMemory: false,
     includeDashboard: true,
     systemPrompt: REVIEWER_SYSTEM_PROMPT,
-    extraFactories: [createGuardrailExtension(manualActions, allowedServicesHolder)],
+    extraFactories: [createGuardrailExtension(manualActions, allowedServicesHolder, telemetry)],
   });
   await loader.reload();
 
@@ -54,6 +66,7 @@ export async function createReviewerSession(
     customTools: [createSubmitVerdictTool(holder), createRunTestsTool(config.workspaceRoot)],
     tools: REVIEWER_TOOLS,
   });
+  await activateSession(session);
 
   return { session, holder };
 }

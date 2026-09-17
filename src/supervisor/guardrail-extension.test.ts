@@ -110,4 +110,42 @@ describe("evaluateToolCall", () => {
     expect(manualActions[0].attemptedAction).not.toContain("abcdefghijklmnopqrstuvwxyz0123456789");
     expect(manualActions[0].attemptedAction).toContain("[REDACTED]");
   });
+
+  it("calls onDecision with tier 1 and blocked:true for a Tier-1 match", async () => {
+    const decisions: import("../telemetry/types.js").GuardrailDecisionRecord[] = [];
+    await evaluateToolCall(
+      "bash",
+      { command: "DROP TABLE orders" },
+      [],
+      [],
+      async () => {
+        throw new Error("classifyGrayArea should not be called for a Tier-1 match");
+      },
+      (record) => decisions.push(record),
+    );
+    expect(decisions).toEqual([{ tier: 1, toolName: "bash", blocked: true, reason: expect.stringContaining("devops") }]);
+  });
+
+  it("calls onDecision with tier 2 and blocked:false when the classifier flags without blocking", async () => {
+    const decisions: import("../telemetry/types.js").GuardrailDecisionRecord[] = [];
+    await evaluateToolCall(
+      "write",
+      { path: "/workspace/fastrr-oms/migrations/V2.sql" },
+      [],
+      [],
+      async () => ({ decision: "flag", reason: "Probably fine, double-check before go-live" }),
+      (record) => decisions.push(record),
+    );
+    expect(decisions).toEqual([
+      { tier: 2, toolName: "write", blocked: false, reason: "Probably fine, double-check before go-live" },
+    ]);
+  });
+
+  it("does not call onDecision for an ordinary tool call", async () => {
+    const decisions: import("../telemetry/types.js").GuardrailDecisionRecord[] = [];
+    await evaluateToolCall("bash", { command: "mvn test" }, [], [], async () => {
+      throw new Error("classifyGrayArea should not be called");
+    }, (record) => decisions.push(record));
+    expect(decisions).toHaveLength(0);
+  });
 });

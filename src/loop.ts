@@ -2,6 +2,7 @@ import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import type { AllowedServicesHolder } from "./supervisor/guardrail-extension.js";
 import type { PlanArtifact, ReviewVerdict } from "./types.js";
 import type { SubmissionHolder } from "./tools/submit-tools.js";
+import type { PipelineTelemetry } from "./telemetry/types.js";
 
 export interface LoopSessions {
   planner: { session: Pick<AgentSession, "prompt">; holder: SubmissionHolder<PlanArtifact> };
@@ -21,6 +22,7 @@ export async function runLoop(
   sessions: LoopSessions,
   maxLoopIterations: number,
   allowedServicesHolder: AllowedServicesHolder,
+  telemetry?: PipelineTelemetry,
 ): Promise<LoopOutcome> {
   const planHistory: string[] = [];
   const rejectionHistory: string[] = [];
@@ -33,6 +35,7 @@ export async function runLoop(
   allowedServicesHolder.services = plan.services;
 
   for (let iteration = 1; iteration <= maxLoopIterations; iteration++) {
+    telemetry?.recordLoopIteration(iteration, maxLoopIterations);
     planHistory.push(plan.planMarkdown);
 
     await sessions.coder.session.prompt(

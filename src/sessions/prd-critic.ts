@@ -4,7 +4,7 @@ import type { AgentSession, ModelRuntime } from "@earendil-works/pi-coding-agent
 import { createMandatoryToolsExtension } from "../enforcement/mandatory-tools-extension.js";
 import { createFinalizePrdTool, type SubmissionHolder } from "../tools/submit-tools.js";
 import type { RunConfig } from "../types.js";
-import { buildResourceLoader } from "./extension-loader.js";
+import { activateSession, buildResourceLoader } from "./extension-loader.js";
 
 const PRD_CRITIC_SYSTEM_PROMPT = `You are the PRD-critic for the fastrr-checkout-services engineering team.
 
@@ -12,9 +12,8 @@ You are the single most important agent in this pipeline: the only line of defen
 wrong thing, or building the right thing in a way that fights this codebase's actual architecture. This is a
 ~20-service Java microservice, multirepo codebase.
 
-Before you finalize any critique, you MUST consult: GitNexus (for call-graph/impact analysis), the fastrr
-architecture/context tools (for cross-service and endpoint-flow knowledge), the \`knowledgebase/\` folder at
-the root of this workspace (for org-specific gotchas no single service's code reveals on its own — read
+Before you finalize any critique, you MUST consult: GitNexus (for call-graph/impact analysis), the
+\`knowledgebase/\` folder at the root of this workspace (for org-specific gotchas no single service's code reveals on its own — read
 \`knowledgebase/00-cross-cutting-gotchas.md\` first, always; then read whichever subsystem file(s) match the
 service(s) the PRD is likely to touch, per the table in \`knowledgebase/README.md\`), and your own memory
 (for what you've learned about this codebase in past sessions). Push back on the PRD with concrete reasoning
@@ -26,9 +25,21 @@ incorporating everything the conversation settled on — not the original text w
 finalizing, write any durable new learning about this codebase to memory with memory_write, so future PRD
 sessions start smarter than this one did.`;
 
+// "mcp__gitnexus" / "mcp__fastrr" group-style names do not resolve to anything — this SDK
+// has no group/wildcard tool-name syntax, and pi-mcp-extension registers each MCP tool
+// individually as "mcp_<server>_<tool>" (confirmed empirically: passing "mcp__gitnexus" in
+// `tools:` silently drops every GitNexus tool with no error, leaving the critic with none of
+// them). Real tool names must be listed individually.
+//
+// fastrr_* tools (fastrr_context_overview, fastrr_search_context, etc.) are NOT included below
+// because no fastrr MCP server is configured in .pi/mcp.json yet — only "gitnexus" is. Per
+// HANDOVER.md, reaching the fastrr_* tools requires the agent_one-style SSO/JWT flow that
+// hasn't been built. Until that server is registered, listing fastrr_* names here would be
+// dead weight (same silent no-op as the group-name bug above), not a working capability.
 const PRD_CRITIC_TOOLS = [
-  "mcp__gitnexus",
-  "mcp__fastrr",
+  "mcp_gitnexus_query",
+  "mcp_gitnexus_context",
+  "mcp_gitnexus_impact",
   "read",
   "grep",
   "memory_write",
@@ -37,7 +48,7 @@ const PRD_CRITIC_TOOLS = [
   "finalize_prd",
 ];
 
-const PRD_CRITIC_REQUIRED_BEFORE_FINALIZE = ["mcp__gitnexus", "memory_read", "memory_search"];
+const PRD_CRITIC_REQUIRED_BEFORE_FINALIZE = ["mcp_gitnexus_query", "memory_read", "memory_search"];
 
 export interface PrdCriticSessionResult {
   session: AgentSession;
@@ -82,6 +93,7 @@ export async function createPrdCriticSession(
     customTools: [createFinalizePrdTool(holder)],
     tools: PRD_CRITIC_TOOLS,
   });
+  await activateSession(session);
 
   return { session, holder };
 }

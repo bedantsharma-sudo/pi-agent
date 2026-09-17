@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { runLoop, type LoopSessions } from "./loop.js";
 import type { PlanArtifact, ReviewVerdict } from "./types.js";
+import type { PipelineTelemetry } from "./telemetry/types.js";
 
 function makeFakeSessions(script: {
   plans: PlanArtifact[];
@@ -83,5 +84,23 @@ describe("runLoop", () => {
     const outcome = await runLoop(sessions, 3, { services: [] });
     expect(outcome.result).toBe("escalation");
     expect(outcome.iterations).toBe(3);
+  });
+
+  it("records one loop_iteration telemetry call per iteration when telemetry is provided", async () => {
+    const sessions = makeFakeSessions({
+      plans: [
+        { planMarkdown: "p1", services: ["aggregator-service"], notes: "" },
+        { planMarkdown: "p2", services: ["aggregator-service"], notes: "" },
+      ],
+      verdicts: [
+        { status: "revise", findings: ["missing null check"] },
+        { status: "approve", findings: [] },
+      ],
+    });
+    const telemetry: Pick<PipelineTelemetry, "recordLoopIteration"> = { recordLoopIteration: vi.fn() };
+    await runLoop(sessions, 30, { services: [] }, telemetry as PipelineTelemetry);
+    expect(telemetry.recordLoopIteration).toHaveBeenCalledTimes(2);
+    expect(telemetry.recordLoopIteration).toHaveBeenNthCalledWith(1, 1, 30);
+    expect(telemetry.recordLoopIteration).toHaveBeenNthCalledWith(2, 2, 30);
   });
 });
