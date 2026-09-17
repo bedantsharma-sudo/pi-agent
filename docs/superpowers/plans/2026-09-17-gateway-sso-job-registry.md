@@ -662,8 +662,11 @@ export function createJobRegistry(db: Database): JobRegistry {
   `);
 
   const getStmt = db.prepare<[string], JobRow>("SELECT * FROM jobs WHERE job_id = ?");
+  // rowid as a secondary sort key breaks ties deterministically in insertion order — two jobs
+  // created in the same test (or the same millisecond in production) would otherwise have an
+  // unspecified relative order under started_at DESC alone.
   const listByUserStmt = db.prepare<[string], JobRow>(
-    "SELECT * FROM jobs WHERE user_email = ? ORDER BY started_at DESC",
+    "SELECT * FROM jobs WHERE user_email = ? ORDER BY started_at DESC, rowid DESC",
   );
   const insertJobStmt = db.prepare(
     "INSERT INTO jobs (job_id, user_email, status, started_at) VALUES (@jobId, @userEmail, 'pending', @startedAt)",
@@ -915,11 +918,19 @@ Expected: FAIL — `./jwt.js` does not exist.
 ```typescript
 // gateway/src/jwt.ts
 import type { LocalUser } from "./local-users.js";
-import type { FetchLike } from "./fastrr-auth.js";
 
 export interface ScopedJwt {
   token: string;
 }
+
+// A POST-shaped fetch, distinct from fastrr-auth.ts's FetchLike (which only types a GET-style
+// call with a headers init) — this task needs method/headers/body, so it gets its own local
+// injectable type rather than widening the other module's, which would loosen that module's
+// test-injection type for no benefit to it.
+export type PostFetchLike = (
+  url: string,
+  init: { method: string; headers: Record<string, string>; body: string },
+) => Promise<{ ok: boolean; json: () => Promise<unknown> }>;
 
 // Deliberately does NOT sign locally with a shared secret this project would have to hold.
 // This calls the same real /internal/sign-jwt endpoint agent_one's own frontend calls
@@ -930,13 +941,13 @@ export interface ScopedJwt {
 export async function mintScopedJwt(
   user: LocalUser,
   agentServerBaseUrl: string,
-  fetchImpl: FetchLike = fetch,
+  fetchImpl: PostFetchLike = fetch,
 ): Promise<ScopedJwt> {
   const response = await fetchImpl(`${agentServerBaseUrl}/internal/sign-jwt`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email: user.email, name: user.name, role: user.role }),
-  } as never);
+  });
   const body = response.ok ? ((await response.json()) as { token?: string }) : undefined;
   if (!body?.token) {
     throw new Error(`Failed to mint JWT for ${user.email}`);
@@ -944,8 +955,6 @@ export async function mintScopedJwt(
   return { token: body.token };
 }
 ```
-
-> Note: `FetchLike` as defined in Task 5 only types a two-argument call with a `headers` init; this task calls `fetchImpl` with `method`/`headers`/`body` instead, which is why the call is cast `as never` rather than widening `FetchLike` itself — the real `fetch` global accepts either shape, and widening the shared test-injection type would loosen every other consumer's type safety for no benefit. If the task reviewer flags this cast as untyped, the fix is to give this file its own local `PostFetchLike` type (mirroring `FetchLike`'s pattern) rather than removing the injection — do not fall back to calling the global `fetch` directly.
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -1230,6 +1239,13 @@ export function createGatewayApp(deps: GatewayAppDeps): Express {
   const mintScopedJwt = deps.mintScopedJwt ?? defaultMintScopedJwt;
   const app = express();
 
+  // This is deliberately the fixed, public Fastrr Admin login-portal domain — NOT
+  // deps.fastrrBaseUrl. Spec §3 step 1 hits fastrr-admin.fastrr.com literally (the
+  // human-facing redirect), while deps.fastrrBaseUrl (used below in /auth/callback) is the
+  // separate, independently-configurable base for the server-to-server aggregator-service API
+  // call (spec §3 step 3) — agent_one keys a dev-bypass off that second value pointing at a
+  // completely different domain (api-dev.pickrr.com), confirming the two are not meant to be
+  // the same setting. Do not collapse these into one config value.
   app.get("/auth/login", (_req: Request, res: Response) => {
     res.redirect(`https://fastrr-admin.fastrr.com/auth-and-redirect?source=${SOURCE}`);
   });
