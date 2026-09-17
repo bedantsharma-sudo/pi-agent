@@ -87,7 +87,7 @@ gateway/
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "better-sqlite3": "^11.3.0",
+    "better-sqlite3": "^12.0.0",
     "express": "^4.21.0",
     "jsonwebtoken": "^9.0.2"
   },
