@@ -152,6 +152,20 @@ Coder's leftover uncommitted changes were committed with message "very small tes
 pushed to the exact branch name (`pipeline/3ab8fe67-27e2-4649-b5b2-a20c2435c5dc`) the already-open
 MR expected, so it picked up the real diff without needing a new MR.
 
+**A third, related bug surfaced checking `payment-aggregator`'s equivalent state (commit
+`f69dc73`):** its uncommitted Coder changes were sitting on top of
+`bedant/FAS-1234-auto-pg-orchestration` — a real, pre-existing, unrelated feature branch with
+~10 actual commits (shadow pricing consumer, ledger API, Kafka topic configs, Mongo document
+models). Root cause: nothing in this pipeline ever chose or created a branch before the Coder
+started editing — it just worked on whatever happened to already be checked out in each repo.
+Fixed with `prepareServiceBranch()`/`prepareWorkspaceBranches()` in `src/git-commit-push.ts`:
+before the Coder's first turn, every service repo under `workspaceRoot` gets checked out onto
+its own fresh `pipeline/<runId>` branch, cut from that repo's *actual* default branch — discovered
+per-repo via `git symbolic-ref refs/remotes/origin/HEAD` rather than a hardcoded name, since this
+org's services split between `release_j21` (Java-21-migrated) and `release` (the rest) — confirmed
+empirically against `payment-core`/`payment-aggregator` (`release_j21`) and `fastrr-oms`
+(`release`), not guessed.
+
 Note for whoever runs this next: the CLI (`src/index.ts`) prints MR URLs to stdout on success,
 but that only reaches whatever terminal the process is actually running in — it does not surface
 into a Claude Code chat session unless that session is the one that launched the process. If you
