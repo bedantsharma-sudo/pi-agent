@@ -46,4 +46,20 @@ describe("checkTier1Rules", () => {
     const result = checkTier1Rules("write", { path: "/workspace/anything/Main.java" }, []);
     expect(result.matched).toBe(false);
   });
+
+  it("allows a relative path (no leading slash) starting with a declared service (regression)", () => {
+    // Confirmed against a real run: the Coder passed a relative path like this for an
+    // edit inside payment-aggregator, and it was wrongly blocked as out-of-scope.
+    const result = checkTier1Rules(
+      "edit",
+      { path: "payment-aggregator/src/test/java/com/pickrr/payment/core/services/PgOrchestrationSwitchServiceTest.java" },
+      ["payment-core", "payment-aggregator"],
+    );
+    expect(result.matched).toBe(false);
+  });
+
+  it("still blocks a relative path outside every declared service", () => {
+    const result = checkTier1Rules("edit", { path: "fastrr-oms/src/Main.java" }, ["payment-core", "payment-aggregator"]);
+    expect(result.matched).toBe(true);
+  });
 });

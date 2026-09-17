@@ -32,12 +32,22 @@ function checkBash(input: Record<string, unknown>): Tier1Match {
   return { matched: false };
 }
 
+// A service is "in scope" for a path if the service name appears as a full path segment
+// anywhere in it. Matching only `/${service}/` (both slashes required) misses a relative
+// path that starts with the service name and has no leading slash — e.g. a Coder-supplied
+// path like "payment-aggregator/src/Main.java" — which wrongly blocked a legitimate edit
+// (confirmed against a real run: this exact relative-path shape was rejected as
+// out-of-scope even though payment-aggregator was a declared service).
+function isPathInService(path: string, service: string): boolean {
+  return path === service || path.startsWith(`${service}/`) || path.includes(`/${service}/`);
+}
+
 function checkFileScope(input: Record<string, unknown>, allowedServices: string[]): Tier1Match {
   if (allowedServices.length === 0) {
     return { matched: false };
   }
   const path = String((input as { path?: string }).path ?? "");
-  const inScope = allowedServices.some((service) => path.includes(`/${service}/`));
+  const inScope = allowedServices.some((service) => isPathInService(path, service));
   if (!inScope) {
     return {
       matched: true,

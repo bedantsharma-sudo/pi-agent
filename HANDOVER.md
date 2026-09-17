@@ -91,6 +91,28 @@ Live status ledger: `.superpowers/sdd/2026-09-15-agent-pipeline-implementation/p
 
 **Not started (Tasks 8-21):** the Tier-2 model classifier, the submit-tool factories, wiring the Supervisor/enforcement hooks into actual `pi.on("tool_call")` handlers, all five session factories (PRD-critic/Planner/Coder/Reviewer + the loop driver), the audit log, GitLab MR creation via `glab`, the top-level orchestrator, the CLI entry point, and finally an end-to-end validation run against a real low-stakes PRD. In short: every individual building block so far is real and tested in isolation, but **nothing is wired together into a runnable pipeline yet** — that assembly happens in the later tasks (roughly 13-20).
 
+## Bugs found from a live run, and fixed (2026-09-17)
+
+A live end-to-end run against `fastrr-checkout-services` (PRD: add a trivial success-response
+endpoint to `payment-core`) completed the actual coding work correctly — Planner/Coder/Reviewer
+converged in 2 iterations, `payment-core` and `payment-aggregator` were touched, tests passed —
+but the run still died with an uncaught error. **Neither of these was a mistake by the Coder or
+any other agent; both were bugs in the pipeline's own code**, now fixed with regression tests
+(see `src/mr.test.ts` and `src/supervisor/tier1-rules.test.ts`):
+
+- **`src/mr.ts` — the actual crash.** `createMergeRequest` always appended `--fill` to `glab mr
+  create` *in addition to* the explicit `--title`/`--description` it always supplies. `glab
+  1.112.0` hard-errors on that combination (`Usage of --title and --description overrides
+  --fill`) instead of the older silent-override behavior. Since title/description are always
+  supplied explicitly, `--fill` was never doing anything useful — removed.
+- **`src/supervisor/tier1-rules.ts` — a false-positive guardrail block, contributing noise to
+  the same run.** `checkFileScope` matched a path against an allowed service with
+  `path.includes("/${service}/")`, which requires a leading slash before the service name. The
+  Coder passed a relative path with no leading slash (`payment-aggregator/src/test/...`), so a
+  legitimate edit inside a declared service was wrongly flagged as out-of-scope — the resulting
+  `manualAction` text is what shows up as the garbled `edit({...})` line in a bad MR description
+  if you hit this before the fix. Fixed to also match a path that *starts with* `service/`.
+
 ## How to run and test this project right now
 
 There is no working end-to-end pipeline to run yet (see above) — what you can do today:
