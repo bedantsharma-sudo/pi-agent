@@ -10,12 +10,13 @@ Design work happened in a **separate repo**, kept apart from this one deliberate
 
 `/Users/bedantsharma/agent-pipeline/docs/superpowers/specs/`
 
-Two specs, in dependency order:
+Two specs plus one feasibility research doc, in dependency order:
 
 1. **`2026-09-15-agent-pipeline-design.md`** — the pipeline itself: the five agents (PRD-critic, Planner, Coder, Reviewer, Supervisor), how they hand off work, tool access, enforcement, and how a run ends (local tests + a GitLab MR, nothing further).
-2. **`2026-09-15-multi-user-infra-design.md`** — wraps #1 with SSO and per-user isolation so 30-40 people can run it concurrently on one shared box. Depends on #1; doesn't change how the pipeline itself behaves.
+2. **`2026-09-15-multi-user-infra-design.md`** — wraps #1 with SSO and per-user isolation so 30-40 people can run it concurrently on one shared box. Depends on #1; doesn't change how the pipeline itself behaves. **Revised 2026-09-17**: §11 now specs a forked/customized `pi-web` (not `pi-agent-dashboard`) as the per-user interactive UI — stage-progress tab, telemetry+memory tab, a read-only/admin-editable knowledgebase tab, and live steering into job-container sessions. §3 step 6 (JWT minting) was also corrected after implementing it for real — see "Gateway service" below.
+3. **`2026-09-17-a2a-feasibility-research.md`** — research answering "should the five pipeline agents talk to each other over the A2A protocol / `pi-a2a-adaptor`?" **Verdict: no.** A2A is built for independently-deployed agents discovering each other dynamically, not a fixed known pipeline; `pi-a2a-adaptor` is client-only, third-party, and untested against headless SDK sessions. Adopting it would mean reversing the submit-tool/guardrail/Supervisor-as-hook architecture spec #1 already committed to, for a coarser-grained, harder-to-enforce model. Not acted on further.
 
-Read both in full before implementing — this document summarizes *why* things were decided, not *what* to build; the specs have the actual detail (schemas, tool tables, section-by-section design).
+Read all three before implementing — this document summarizes *why* things were decided, not *what* to build; the specs have the actual detail (schemas, tool tables, section-by-section design).
 
 ## Why Pi, and why the SDK (not RPC, not subprocesses)
 
@@ -112,6 +113,33 @@ any other agent; both were bugs in the pipeline's own code**, now fixed with reg
   legitimate edit inside a declared service was wrongly flagged as out-of-scope — the resulting
   `manualAction` text is what shows up as the garbled `edit({...})` line in a bad MR description
   if you hit this before the fix. Fixed to also match a path that *starts with* `service/`.
+
+## Gateway service (spec #2): SSO, JWT minting, job registry — implemented (2026-09-17)
+
+A new, standalone `gateway/` package (sibling to `src/`, its own `package.json`/`tsconfig.json`/`vitest.config.ts` — deliberately **not** an npm workspace, since it shares no code with the orchestrator yet) now implements spec #2 §3/§6/§9: SSO token validation, JWT minting, the local user/role table, and the job registry. Built via subagent-driven-development on its own branch/worktree, plan at `docs/superpowers/plans/2026-09-17-gateway-sso-job-registry.md`, on branch `feature/gateway-sso-job-registry` (forked from this branch at commit `ffc6a2c`). All 10 tasks done, individually reviewed clean, plus a final whole-branch review (which caught and fixed two real cross-task issues no single task's review could see — see below), plus one more issue the controller caught independently while re-verifying the fix wave's own test-count claim.
+
+**What's built and tested (40 tests in `gateway/`, all passing, 0 npm audit vulnerabilities):**
+- `gateway/src/fastrr-auth.ts` — validates a Fastrr Admin token against `aggregator-service` directly (`GET {FASTRR_BASE_URL}/api/ve1/aggregator-service/user/login-detail/`), matching `agent_one`'s real code exactly (verified by reading its source, not just its README) — deliberately **without** replicating `agent_one`'s `api-dev.pickrr.com` dev-bypass, which skips validation entirely.
+- `gateway/src/jwt.ts` — mints a scoped JWT by POSTing to the real `/internal/sign-jwt` endpoint `agent_one`'s own frontend calls, rather than signing locally. This is a **correction** to the original spec text, which assumed the token gets "forwarded raw (no re-signing)" — direct inspection of `agent_one`'s code found it actually re-signs per hop and never forwards raw either. This gateway never holds `MCP_JWT_SECRET`.
+- `gateway/src/local-users.ts` — local user/role table (`submit_prds` | `admin`), auto-provisioned on first login, admins seeded via `GATEWAY_SEED_ADMIN_EMAILS` (not hardcoded — set it to include `rizwan1@pickrr.com` for testing, matching his `admin`/`super_admin` role in `agent_one`).
+- `gateway/src/job-registry.ts` — `jobs` + `job_sessions` SQLite tables per spec §6/§11.4, ready for the (not-yet-built) orchestrator wiring to import.
+- `gateway/src/session-cookie.ts` — HMAC-signed session cookies, constant-time verified (security-reviewed specifically for the timing-safe comparison).
+- `gateway/src/app.ts` + `index.ts` — Express app (`GET /auth/login`, `GET /auth/callback`, `GET /api/me`) and process entry point.
+- `gateway/scripts/verify-real-login.ts` — manual (not automated) script to test the real SSO flow against the actual `aggregator-service`, using the test credential in `agent_one`'s own README. Attempted once during implementation: DNS/HTTP reachable, but the real API endpoint needs VPN/internal network access this dev machine doesn't have — an expected, anticipated outcome, not a bug (`validateFastrrToken` itself is fully unit-tested).
+
+**Explicitly out of scope for this plan** (tracked as follow-up work, not started): Docker provisioning/idle-teardown (spec §4/§7/§8), wiring the *orchestrator* (`src/`) to actually write into the job registry, and the `pi-web` fork (spec §11) — separate repo, separate plan.
+
+**Caught by the whole-branch review, now fixed** (illustrates why the final review step matters even after every task passed individually): `/auth/callback`'s async handler had no try/catch — on **Express 4** (which doesn't catch async-handler rejections, unlike Express 5), a network blip during token validation became an unhandled rejection that hung the request and could crash the process. Also, the root package's `vitest run` had no config scoping it to `src/**`, so it silently started collecting `gateway/`'s test files too — broken on a fresh clone where `gateway/node_modules` isn't yet installed, though it happened to pass locally. Both fixed with regression coverage. A third, related issue (a stale local `gateway/dist/` directory doubling the gateway suite's own test count, since vitest's defaults don't exclude build output) was caught by the controller independently rather than accepted at face value from a subagent's report — worth remembering: don't trust a suspicious test-count jump without investigating why.
+
+**Tracked but not fixed in this branch:** the SSO round-trip has no CSRF `state` nonce (spec #2 §14) — low impact today (nothing sensitive is reachable yet), but should land before job submission does.
+
+**How to run it:**
+```bash
+cd /Users/bedantsharma/pi-pipeline/.worktrees/feature-gateway-sso-job-registry/gateway
+npm install
+npm test           # 40 tests
+npm run typecheck
+```
 
 ## How to run and test this project right now
 
