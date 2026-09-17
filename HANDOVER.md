@@ -114,19 +114,50 @@ any other agent; both were bugs in the pipeline's own code**, now fixed with reg
   `manualAction` text is what shows up as the garbled `edit({...})` line in a bad MR description
   if you hit this before the fix. Fixed to also match a path that *starts with* `service/`.
 
-**Fix confirmed working end-to-end (2026-09-17):** a subsequent live run against
-`fastrr-checkout-services` completed cleanly in 1 iteration and opened a real MR —
-[`payment-core!612`](https://gitlab.pickrr.com/pickrr/payment-core/-/merge_requests/612)
-(services touched: payment-core, payment-aggregator; "No manual actions required"). Note for
-whoever runs this next: the CLI (`src/index.ts`) prints `MR opened: <url>` to stdout on success,
+**That fix worked (a subsequent run completed cleanly in 1 iteration, Reviewer approved,
+services touched: payment-core, payment-aggregator), but revealed a second, bigger gap:
+the resulting MR — [`payment-core!612`](https://gitlab.pickrr.com/pickrr/payment-core/-/merge_requests/612)
+— was empty**, and no second MR ever appeared for `payment-aggregator` at all. Root cause,
+confirmed by grepping the whole repo: **nothing in this pipeline ever ran `git commit` or
+`git push`, anywhere** — not the orchestrator, not the Coder's system prompt (which never
+mentions git at all, despite the Coder having `bash` access it could have used on its own
+initiative but didn't). The Coder's edits sat as plain uncommitted working-tree changes;
+`createMergeRequest` opened an MR against a `pipeline/<runId>` branch that never existed, so
+GitLab created it anyway with nothing to diff. Separately, `runPipeline` only ever called
+`createMergeRequest` **once**, against `finalPlan.services[0]` — explaining the missing second MR.
+
+Fixed (2026-09-17, commit `e0c9fe3`), with regression tests in `src/git-commit-push.test.ts`:
+- **`src/git-commit-push.ts`** (new): `commitAndPushChanges()` is now the deterministic
+  orchestrator-level commit/push step — same reasoning this project already applied to MR
+  creation itself (a malformed command is a bad place for model unreliability to show up).
+  `snapshotWorkspaceUntracked()` records each service repo's untracked files *before* the
+  Coder's first edit, so the commit step can tell "the Coder created this" apart from
+  pre-existing local dev-tooling cruft (confirmed present in this exact repo — `.claude/`,
+  `AGENTS.md`, `CLAUDE.md` — none of which should ever land in a pipeline commit) without
+  needing an allowlist/blocklist of filenames.
+- **`src/orchestrator.ts`**: now commits+pushes each of `finalPlan.services` in turn after
+  Reviewer approval (skipping any with no real diff — a revision can narrow scope) and opens
+  an MR only for the ones that actually changed, instead of always exactly one. Also fixed the
+  MR/commit title leaking a literal markdown `#` (`derivePlanTitle()`) — the `#612` MR above
+  still shows the old broken title (`[pipeline] # Implementation Plan`) since it predates this fix.
+- **`src/index.ts`**: `PipelineResult.mrUrl` → `mrUrls` (plural); prints every MR opened.
+
+**Not fixed, flagged as a known follow-up**: after a commit+push, each repo is left checked out
+on the new `pipeline/<runId>` branch, not reset to its base branch — a *subsequent* run against
+the same workspace would start from there rather than fresh. Separate concern (workspace
+preparation between runs isn't modeled by this pipeline at all yet), not part of either issue above.
+
+**MR #612 itself was hand-repaired** (not by the pipeline code — this predates the fix): the
+Coder's leftover uncommitted changes were committed with message "very small test change" and
+pushed to the exact branch name (`pipeline/3ab8fe67-27e2-4649-b5b2-a20c2435c5dc`) the already-open
+MR expected, so it picked up the real diff without needing a new MR.
+
+Note for whoever runs this next: the CLI (`src/index.ts`) prints MR URLs to stdout on success,
 but that only reaches whatever terminal the process is actually running in — it does not surface
 into a Claude Code chat session unless that session is the one that launched the process. If you
 lose track of a run's outcome, check `{workspaceRoot}/telemetry/{runId}.jsonl` (the `run` span's
-`pipeline.outcome`/`pipeline.result_summary` attributes have it) rather than assuming failure.
-One pre-existing cosmetic rough edge visible in that MR: the title literally includes the plan's
-markdown `#` heading character (`[pipeline] # Implementation Plan`) — harmless, comes from
-`orchestrator.ts` just taking the plan's first line verbatim; not fixed, not currently blocking
-anything.
+`pipeline.outcome`/`pipeline.result_summary` attributes have it) rather than assuming failure —
+that's exactly how this empty-MR bug was actually diagnosed.
 
 ## Gateway service (spec #2): SSO, JWT minting, job registry — implemented and merged (2026-09-17)
 
