@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { appendAuditLogEntry, hashPrdText } from "./audit-log.js";
+import { commitAndPushChanges, snapshotWorkspaceUntracked } from "./git-commit-push.js";
 import { runLoop } from "./loop.js";
 import { createMergeRequest } from "./mr.js";
 import { createCoderSession } from "./sessions/coder.js";
@@ -17,8 +18,17 @@ import type { AgentSession } from "@earendil-works/pi-coding-agent";
 
 export interface PipelineResult {
   outcome: "mr_opened" | "escalated";
-  mrUrl?: string;
+  /** One entry per service that actually had changes committed — a plan can name a service that ends up untouched. */
+  mrUrls?: string[];
   reportMarkdown: string;
+}
+
+// The MR title (and now the commit message) both derive from the plan's first line — strip a
+// literal leading markdown heading marker so it doesn't leak into either (regression: MRs were
+// titled "[pipeline] # Implementation Plan" verbatim before this).
+function derivePlanTitle(planMarkdown: string): string {
+  const firstLine = planMarkdown.split("\n")[0] ?? "";
+  return firstLine.replace(/^#+\s*/, "").trim().slice(0, 80);
 }
 
 export interface HumanIo {
@@ -80,6 +90,14 @@ export async function runPipeline(config: RunConfig, io: HumanIo): Promise<Pipel
     });
 
     // --- Stage 2: the autonomous Planner/Coder/Reviewer loop ---
+    // Snapshot every service repo's untracked files now, before the Coder's first edit —
+    // whichever services end up touched, commitAndPushChanges needs to tell "the Coder created
+    // this file" apart from "this file (e.g. local dev-tooling cruft) was already sitting here,
+    // untracked, before this run started." Taken for the whole workspace rather than just the
+    // plan's declared services, since a Reviewer rejection can revise which services are
+    // touched across loop iterations.
+    const untrackedSnapshot = await snapshotWorkspaceUntracked(config.workspaceRoot);
+
     const allowedServicesHolder: AllowedServicesHolder = { services: [] };
     const planner = await createPlannerSession(config, modelRuntime, manualActions, allowedServicesHolder, telemetry);
     const coder = await createCoderSession(config, modelRuntime, manualActions, allowedServicesHolder, telemetry);
@@ -136,19 +154,47 @@ export async function runPipeline(config: RunConfig, io: HumanIo): Promise<Pipel
     );
     const reportMarkdown = formatReportAsMarkdown(report);
 
-    const primaryRepo = outcome.finalPlan.services[0];
-    if (!primaryRepo) {
+    if (outcome.finalPlan.services.length === 0) {
       throw new Error("Final plan named no services — cannot open an MR");
     }
-    const { url } = await createMergeRequest({
-      repoPath: `${config.workspaceRoot}/${primaryRepo}`,
-      title: `[pipeline] ${outcome.finalPlan.planMarkdown.split("\n")[0].slice(0, 80)}`,
-      description: reportMarkdown,
-      sourceBranch: `pipeline/${config.runId}`,
-    });
 
-    telemetry.endRun("mr_opened", url);
-    return { outcome: "mr_opened", mrUrl: url, reportMarkdown };
+    const title = derivePlanTitle(outcome.finalPlan.planMarkdown);
+    const branchName = `pipeline/${config.runId}`;
+    const mrUrls: string[] = [];
+
+    // One MR per service the plan named — not just the first one. Each service is its own git
+    // repo under workspaceRoot, so each needs its own deterministic commit+push (the Coder's
+    // edits land in the working tree; nothing else in this pipeline ever committed or pushed
+    // them) before it can have an MR opened against it at all. A service the plan named but
+    // that ends up with no actual diff (e.g. a revision narrowed scope) is skipped, not an
+    // error — only services with a real committed change get an MR.
+    for (const service of outcome.finalPlan.services) {
+      const repoPath = `${config.workspaceRoot}/${service}`;
+      const commitResult = await commitAndPushChanges({
+        repoPath,
+        branchName,
+        commitMessage: title,
+        preExistingUntrackedFiles: untrackedSnapshot.get(service) ?? new Set(),
+      });
+      if (!commitResult.committed) continue;
+
+      const { url } = await createMergeRequest({
+        repoPath,
+        title: `[pipeline] ${title}`,
+        description: reportMarkdown,
+        sourceBranch: branchName,
+      });
+      mrUrls.push(url);
+    }
+
+    if (mrUrls.length === 0) {
+      throw new Error(
+        `Reviewer approved but no changes were found to commit in any of the plan's declared services (${outcome.finalPlan.services.join(", ")}) — did something reset the workspace mid-run?`,
+      );
+    }
+
+    telemetry.endRun("mr_opened", mrUrls.join(", "));
+    return { outcome: "mr_opened", mrUrls, reportMarkdown };
   } catch (error) {
     telemetry.endRun("failed", error instanceof Error ? error.message : String(error));
     throw error;

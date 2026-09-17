@@ -25,7 +25,11 @@ async function main() {
     });
 
     if (result.outcome === "mr_opened") {
-      console.log(`MR opened: ${result.mrUrl}`);
+      const urls = result.mrUrls ?? [];
+      console.log(urls.length === 1 ? `MR opened: ${urls[0]}` : `${urls.length} MRs opened:`);
+      if (urls.length > 1) {
+        for (const url of urls) console.log(`  - ${url}`);
+      }
     } else {
       console.log("Pipeline escalated — no MR opened. See the report below:");
     }
