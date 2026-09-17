@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { appendAuditLogEntry, hashPrdText } from "./audit-log.js";
-import { commitAndPushChanges, snapshotWorkspaceUntracked } from "./git-commit-push.js";
+import { commitAndPushChanges, prepareWorkspaceBranches, snapshotWorkspaceUntracked } from "./git-commit-push.js";
 import { runLoop } from "./loop.js";
 import { createMergeRequest } from "./mr.js";
 import { createCoderSession } from "./sessions/coder.js";
@@ -52,6 +52,7 @@ function streamAssistantText(session: AgentSession, label?: string): () => void 
 export async function runPipeline(config: RunConfig, io: HumanIo): Promise<PipelineResult> {
   const modelRuntime = await ModelRuntime.create();
   const manualActions: ManualActionEntry[] = [];
+  const branchName = `pipeline/${config.runId}`;
 
   // Must run before any session factory — see ensureWorkspaceMcpConfig's own comment for why.
   await ensureWorkspaceMcpConfig(config.piProjectRoot, config.workspaceRoot);
@@ -90,6 +91,17 @@ export async function runPipeline(config: RunConfig, io: HumanIo): Promise<Pipel
     });
 
     // --- Stage 2: the autonomous Planner/Coder/Reviewer loop ---
+    // Give every service repo its own fresh branch, cut from that repo's actual default branch
+    // (discovered per-repo, not hardcoded — this org's services split between `release_j21` and
+    // `release` depending on their Java migration status), *before* the Coder ever gets a turn.
+    // Without this the Coder just edits whatever happens to already be checked out — confirmed,
+    // this is exactly what caused a real run's changes to land on top of an unrelated
+    // pre-existing feature branch with ~10 unrelated commits instead of a clean branch of their
+    // own. Done for the whole workspace up front, same reasoning as the untracked-file snapshot
+    // right below: which services end up touched isn't known until the Planner submits, and can
+    // change across revisions.
+    await prepareWorkspaceBranches(config.workspaceRoot, branchName);
+
     // Snapshot every service repo's untracked files now, before the Coder's first edit —
     // whichever services end up touched, commitAndPushChanges needs to tell "the Coder created
     // this file" apart from "this file (e.g. local dev-tooling cruft) was already sitting here,
@@ -159,7 +171,6 @@ export async function runPipeline(config: RunConfig, io: HumanIo): Promise<Pipel
     }
 
     const title = derivePlanTitle(outcome.finalPlan.planMarkdown);
-    const branchName = `pipeline/${config.runId}`;
     const mrUrls: string[] = [];
 
     // One MR per service the plan named — not just the first one. Each service is its own git

@@ -55,6 +55,52 @@ export async function snapshotWorkspaceUntracked(
   return snapshot;
 }
 
+/**
+ * Checks out a fresh, dedicated branch for this run in a single repo, cut from that repo's
+ * *actual* default branch — discovered per-repo via `origin/HEAD` rather than hardcoded, since
+ * different services in this org use different conventions (`release_j21` for Java-21-migrated
+ * services, `release` for the rest still on Java 11 — confirmed empirically, not guessed).
+ * Fetches that base fresh before cutting the branch so the Coder never starts from a stale local
+ * ref. Without this, the Coder just edits whatever happens to already be checked out — which is
+ * exactly what caused a real run's changes to land on top of an unrelated pre-existing feature
+ * branch with ~10 unrelated commits, rather than a clean branch of their own.
+ */
+export async function prepareServiceBranch(
+  repoPath: string,
+  branchName: string,
+  exec: ExecFn = defaultExec,
+): Promise<void> {
+  const { stdout: headRef } = await exec("git", ["symbolic-ref", "refs/remotes/origin/HEAD"], { cwd: repoPath });
+  const baseBranch = headRef.trim().replace(/^refs\/remotes\/origin\//, "");
+  await exec("git", ["fetch", "origin", baseBranch], { cwd: repoPath });
+  await exec("git", ["checkout", "-B", branchName, `origin/${baseBranch}`], { cwd: repoPath });
+}
+
+/**
+ * Runs prepareServiceBranch for every git-repo directory under `workspaceRoot` — like
+ * snapshotWorkspaceUntracked, done for the whole workspace up front (before the loop starts,
+ * before the Coder's first turn) rather than only for the plan's eventual services, since which
+ * services end up touched isn't known until the Planner submits (and can change across
+ * revisions). A directory that isn't a git repo, or that errors for any other reason, is
+ * skipped rather than aborting the whole run — one broken/unrelated directory under
+ * workspaceRoot shouldn't block every other service from being prepared correctly.
+ */
+export async function prepareWorkspaceBranches(
+  workspaceRoot: string,
+  branchName: string,
+  exec: ExecFn = defaultExec,
+  readDirFn: ReadDirFn = defaultReadDir,
+): Promise<void> {
+  const entries = await readDirFn(workspaceRoot);
+  for (const entry of entries) {
+    try {
+      await prepareServiceBranch(`${workspaceRoot}/${entry}`, branchName, exec);
+    } catch {
+      // Not a git repo (or some other git error) — not a service checkout, skip it.
+    }
+  }
+}
+
 export interface CommitAndPushOptions {
   repoPath: string;
   branchName: string;

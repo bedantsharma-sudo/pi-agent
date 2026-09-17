@@ -1,5 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import { commitAndPushChanges, listUntrackedFiles, snapshotWorkspaceUntracked } from "./git-commit-push.js";
+import {
+  commitAndPushChanges,
+  listUntrackedFiles,
+  prepareServiceBranch,
+  prepareWorkspaceBranches,
+  snapshotWorkspaceUntracked,
+} from "./git-commit-push.js";
 
 function statusOutput(lines: string[]): { stdout: string } {
   return { stdout: lines.join("\n") + (lines.length ? "\n" : "") };
@@ -37,6 +43,85 @@ describe("snapshotWorkspaceUntracked", () => {
     expect(result.get("payment-aggregator")).toEqual(new Set());
     expect(result.has("README.md")).toBe(false);
     expect(readDirFn).toHaveBeenCalledWith("/workspace");
+  });
+});
+
+describe("prepareServiceBranch", () => {
+  it("discovers the repo's real default branch, fetches it fresh, and cuts the pipeline branch from it", async () => {
+    const exec = vi
+      .fn()
+      .mockResolvedValueOnce({ stdout: "refs/remotes/origin/release_j21\n" }) // symbolic-ref
+      .mockResolvedValueOnce({ stdout: "" }) // fetch
+      .mockResolvedValueOnce({ stdout: "" }); // checkout -B
+
+    await prepareServiceBranch("/workspace/payment-core", "pipeline/abc", exec);
+
+    expect(exec).toHaveBeenNthCalledWith(1, "git", ["symbolic-ref", "refs/remotes/origin/HEAD"], {
+      cwd: "/workspace/payment-core",
+    });
+    expect(exec).toHaveBeenNthCalledWith(2, "git", ["fetch", "origin", "release_j21"], {
+      cwd: "/workspace/payment-core",
+    });
+    expect(exec).toHaveBeenNthCalledWith(3, "git", ["checkout", "-B", "pipeline/abc", "origin/release_j21"], {
+      cwd: "/workspace/payment-core",
+    });
+  });
+
+  it("resolves a different base branch name for a repo whose default is 'release', not 'release_j21'", async () => {
+    const exec = vi
+      .fn()
+      .mockResolvedValueOnce({ stdout: "refs/remotes/origin/release\n" })
+      .mockResolvedValueOnce({ stdout: "" })
+      .mockResolvedValueOnce({ stdout: "" });
+
+    await prepareServiceBranch("/workspace/fastrr-oms", "pipeline/abc", exec);
+
+    expect(exec).toHaveBeenNthCalledWith(2, "git", ["fetch", "origin", "release"], { cwd: "/workspace/fastrr-oms" });
+    expect(exec).toHaveBeenNthCalledWith(3, "git", ["checkout", "-B", "pipeline/abc", "origin/release"], {
+      cwd: "/workspace/fastrr-oms",
+    });
+  });
+
+  it("propagates an error when the repo has no configured origin/HEAD, rather than guessing a base branch", async () => {
+    const exec = vi.fn().mockRejectedValueOnce(new Error("fatal: ref refs/remotes/origin/HEAD is not a symbolic ref"));
+    await expect(prepareServiceBranch("/workspace/payment-core", "pipeline/abc", exec)).rejects.toThrow(
+      "not a symbolic ref",
+    );
+  });
+});
+
+describe("prepareWorkspaceBranches", () => {
+  it("prepares every git-repo directory under workspaceRoot, skipping non-repos", async () => {
+    const readDirFn = vi.fn().mockResolvedValue(["payment-core", "payment-aggregator", "README.md"]);
+    const exec = vi.fn().mockImplementation(async (cmd, args, { cwd }: { cwd: string }) => {
+      if (cwd.endsWith("README.md")) throw new Error("not a git repository");
+      if (args[0] === "symbolic-ref") return { stdout: "refs/remotes/origin/release_j21\n" };
+      return { stdout: "" };
+    });
+
+    await prepareWorkspaceBranches("/workspace", "pipeline/abc", exec, readDirFn);
+
+    // "fetch" only happens after symbolic-ref *succeeds*, so this reflects repos that were
+    // actually prepared, not just attempted (exec.mock.calls records rejected attempts too).
+    const preparedRepos = exec.mock.calls
+      .filter(([, args]) => args[0] === "fetch")
+      .map(([, , opts]) => (opts as { cwd: string }).cwd);
+    expect(preparedRepos.sort()).toEqual(["/workspace/payment-aggregator", "/workspace/payment-core"]);
+  });
+
+  it("does not let one repo's failure stop the others from being prepared", async () => {
+    const readDirFn = vi.fn().mockResolvedValue(["broken-repo", "payment-core"]);
+    const exec = vi.fn().mockImplementation(async (cmd, args, { cwd }: { cwd: string }) => {
+      if (cwd.endsWith("broken-repo")) throw new Error("fatal: not a git repository");
+      return { stdout: "refs/remotes/origin/release_j21\n" };
+    });
+
+    await prepareWorkspaceBranches("/workspace", "pipeline/abc", exec, readDirFn);
+
+    const preparedRepos = exec.mock.calls
+      .filter(([, args]) => args[0] === "fetch")
+      .map(([, , opts]) => (opts as { cwd: string }).cwd);
+    expect(preparedRepos).toEqual(["/workspace/payment-core"]);
   });
 });
 
