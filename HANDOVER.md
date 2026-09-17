@@ -114,9 +114,25 @@ any other agent; both were bugs in the pipeline's own code**, now fixed with reg
   `manualAction` text is what shows up as the garbled `edit({...})` line in a bad MR description
   if you hit this before the fix. Fixed to also match a path that *starts with* `service/`.
 
-## Gateway service (spec #2): SSO, JWT minting, job registry — implemented (2026-09-17)
+**Fix confirmed working end-to-end (2026-09-17):** a subsequent live run against
+`fastrr-checkout-services` completed cleanly in 1 iteration and opened a real MR —
+[`payment-core!612`](https://gitlab.pickrr.com/pickrr/payment-core/-/merge_requests/612)
+(services touched: payment-core, payment-aggregator; "No manual actions required"). Note for
+whoever runs this next: the CLI (`src/index.ts`) prints `MR opened: <url>` to stdout on success,
+but that only reaches whatever terminal the process is actually running in — it does not surface
+into a Claude Code chat session unless that session is the one that launched the process. If you
+lose track of a run's outcome, check `{workspaceRoot}/telemetry/{runId}.jsonl` (the `run` span's
+`pipeline.outcome`/`pipeline.result_summary` attributes have it) rather than assuming failure.
+One pre-existing cosmetic rough edge visible in that MR: the title literally includes the plan's
+markdown `#` heading character (`[pipeline] # Implementation Plan`) — harmless, comes from
+`orchestrator.ts` just taking the plan's first line verbatim; not fixed, not currently blocking
+anything.
 
-A new, standalone `gateway/` package (sibling to `src/`, its own `package.json`/`tsconfig.json`/`vitest.config.ts` — deliberately **not** an npm workspace, since it shares no code with the orchestrator yet) now implements spec #2 §3/§6/§9: SSO token validation, JWT minting, the local user/role table, and the job registry. Built via subagent-driven-development on its own branch/worktree, plan at `docs/superpowers/plans/2026-09-17-gateway-sso-job-registry.md`, on branch `feature/gateway-sso-job-registry` (forked from this branch at commit `ffc6a2c`). All 10 tasks done, individually reviewed clean, plus a final whole-branch review (which caught and fixed two real cross-task issues no single task's review could see — see below), plus one more issue the controller caught independently while re-verifying the fix wave's own test-count claim.
+## Gateway service (spec #2): SSO, JWT minting, job registry — implemented and merged (2026-09-17)
+
+A new, standalone `gateway/` package (sibling to `src/`, its own `package.json`/`tsconfig.json`/`vitest.config.ts` — deliberately **not** an npm workspace, since it shares no code with the orchestrator yet) now implements spec #2 §3/§6/§9: SSO token validation, JWT minting, the local user/role table, and the job registry. Built via subagent-driven-development on its own branch/worktree (plan at `docs/superpowers/plans/2026-09-17-gateway-sso-job-registry.md`, branch `feature/gateway-sso-job-registry`, forked from this branch at commit `ffc6a2c`), then **fast-forward merged back into `feature/agent-pipeline-implementation` (this branch) at commit `6b3591c`** — no conflicts, both test suites (root 126/126, gateway 40/40) green on the merged result. All 10 tasks done, individually reviewed clean, plus a final whole-branch review (which caught and fixed two real cross-task issues no single task's review could see — see below), plus one more issue the controller caught independently while re-verifying the fix wave's own test-count claim.
+
+**Not yet pushed to origin** — the local merge is done and verified, but `git push` was blocked by this session's own auto-mode safety classifier (flagged generically as a possible data-exfiltration pattern, on both the push and the subsequent worktree/branch cleanup) and needs a human to run it (or a session with different permissions). The gateway worktree at `.worktrees/feature-gateway-sso-job-registry` and branch `feature/gateway-sso-job-registry` are consequently also still sitting around, fully merged and safe to delete whenever that push happens.
 
 **What's built and tested (40 tests in `gateway/`, all passing, 0 npm audit vulnerabilities):**
 - `gateway/src/fastrr-auth.ts` — validates a Fastrr Admin token against `aggregator-service` directly (`GET {FASTRR_BASE_URL}/api/ve1/aggregator-service/user/login-detail/`), matching `agent_one`'s real code exactly (verified by reading its source, not just its README) — deliberately **without** replicating `agent_one`'s `api-dev.pickrr.com` dev-bypass, which skips validation entirely.
